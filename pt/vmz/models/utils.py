@@ -26,7 +26,6 @@ model_urls = {
 
 def _generic_resnet(arch, pretrained=False, progress=False, **kwargs):
     model = VideoResNet(**kwargs)
-
     # We need exact Caffe2 momentum for BatchNorm scaling
     for m in model.modules():
         if isinstance(m, nn.BatchNorm3d):
@@ -55,7 +54,8 @@ class BasicStem_Pool(nn.Sequential):
             ),
             nn.BatchNorm3d(64),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=(1, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1)),
+            nn.MaxPool3d(kernel_size=(1, 3, 3), stride=(
+                1, 2, 2), padding=(0, 1, 1)),
         )
 
 
@@ -85,7 +85,8 @@ class R2Plus1dStem_Pool(nn.Sequential):
             ),
             nn.BatchNorm3d(64),
             nn.ReLU(inplace=True),
-            nn.MaxPool3d(kernel_size=(1, 3, 3), stride=(1, 2, 2), padding=(0, 1, 1)),
+            nn.MaxPool3d(kernel_size=(1, 3, 3), stride=(
+                1, 2, 2), padding=(0, 1, 1)),
         )
 
 
@@ -154,3 +155,39 @@ class Conv2Plus1D(nn.Sequential):
     @staticmethod
     def get_downsample_stride(stride):
         return (stride, stride, stride)
+
+
+class PositionwiseFeedForward(nn.Module):
+    def __init__(self, d_model, d_ff, dropout=0.1):
+        super(PositionwiseFeedForward, self).__init__()
+
+        self.w1 = nn.Linear(d_model, d_ff)
+        self.w2 = nn.Linear(d_ff, d_model)
+        self.dropout = nn.Dropout(dropout)
+        self.activation = nn.GELU()
+
+    def forward(self, x):
+        return self.w2(self.dropout(self.activation(self.w1(x))))
+
+
+class LayerNorm(nn.Module):
+    def __init__(self, features, eps=1e-6):
+        super(LayerNorm, self).__init__()
+        self.w = nn.Parameter(torch.ones(features))
+        self.b = nn.Parameter(torch.zeros(features))
+        self.eps = eps
+
+    def forward(self, x):
+        mean = x.mean(-1, keepdim=True)
+        std = x.std(-1, keepdim=True)
+        return self.w * (x - mean) / (std + self.eps) + self.b
+
+
+class SublayerConnection(nn.Module):
+    def __init__(self, size, dropout):
+        super(SublayerConnection, self).__init__()
+        self.norm = LayerNorm(size)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x, sublayer):
+        return x + self.dropout(sublayer(self.norm(x)))

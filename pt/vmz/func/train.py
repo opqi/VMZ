@@ -1,18 +1,20 @@
+import vmz.models as models
+from vmz.datasets import get_dataset
+from vmz.common.scheduler import WarmupMultiStepLR
+from vmz.common.sampler import DistributedSampler, UniformClipSampler, RandomClipSampler
+from vmz.common.log import MetricLogger, setup_tbx, get_default_loggers
+from vmz.common import utils, transforms as T
 import datetime
 import os
 import time
 import sys
-
+import numpy as np
 import torch
 import torch.nn as nn
 import torchvision
 
-from vmz.common import utils, transforms as T
-from vmz.common.log import MetricLogger, setup_tbx, get_default_loggers
-from vmz.common.sampler import DistributedSampler, UniformClipSampler, RandomClipSampler
-from vmz.common.scheduler import WarmupMultiStepLR
-from vmz.datasets import get_dataset
-import vmz.models as models
+sys.path.append(os.getcwd())
+
 
 try:
     from apex import amp
@@ -32,9 +34,10 @@ def train_one_epoch(
     metric_logger,
     apex=False,
 ):
+
     model.train()
 
-    header = "Epoch: [{}]".format(epoch)
+    header = f"Epoch: [{epoch}]"  # .format(epoch)
     for data in metric_logger.log_every(data_loader, print_freq, header):
         video, target, _, _ = data
         start_time = time.time()
@@ -52,10 +55,12 @@ def train_one_epoch(
 
         acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
         batch_size = video.shape[0]
-        metric_logger.update(loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
+        metric_logger.update(
+            loss=loss.item(), lr=optimizer.param_groups[0]["lr"])
         metric_logger.meters["acc1"].update(acc1.item(), n=batch_size)
         metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
-        metric_logger.meters["clips/s"].update(batch_size / (time.time() - start_time))
+        metric_logger.meters["clips/s"].update(
+            batch_size / (time.time() - start_time))
         lr_scheduler.step()
 
 
@@ -93,7 +98,8 @@ def train_main(args):
     torchvision.set_video_backend("video_reader")
     if args.apex:
         if sys.version_info < (3, 0):
-            raise RuntimeError("Apex currently only supports Python 3. Aborting.")
+            raise RuntimeError(
+                "Apex currently only supports Python 3. Aborting.")
         if amp is None:
             raise RuntimeError(
                 "Failed to import apex. Please install apex "
@@ -135,7 +141,8 @@ def train_main(args):
         )
         dataset = get_dataset(args, transform_train)
         dataset.video_clips.compute_clips(args.num_frames, 1, frame_rate=15)
-        train_sampler = RandomClipSampler(dataset.video_clips, args.train_bs_multiplier)
+        train_sampler = RandomClipSampler(
+            dataset.video_clips, args.train_bs_multiplier)
         if args.distributed:
             train_sampler = DistributedSampler(train_sampler)
         data_loader = torch.utils.data.DataLoader(
@@ -143,6 +150,7 @@ def train_main(args):
             batch_size=args.batch_size,
             sampler=train_sampler,
             num_workers=args.workers,
+            pin_memory=True
         )
 
     print("\t Loading validation data")
@@ -169,6 +177,7 @@ def train_main(args):
         batch_size=args.batch_size,
         sampler=test_sampler,
         num_workers=args.workers,
+        pin_memory=True
     )
 
     criterion = nn.CrossEntropyLoss()
@@ -176,8 +185,10 @@ def train_main(args):
     print("Creating model")
     # TODO: model only from our models
     available_models = {**models.__dict__}
-    model = available_models[args.model](pretraining=args.pretrained)
+    model = available_models[args.model](
+        pretraining=args.pretrained, num_classes=args.num_classes)
     model.to(device)
+
     if args.distributed and args.sync_bn:
         model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
 
@@ -191,15 +202,34 @@ def train_main(args):
     if args.finetune:
         assert args.resume_from_model is not None or args.pretrained
         model.fc = nn.Linear(model.fc.in_features, args.num_finetune_classes)
+        model.to(device)
 
     lr = args.lr * args.world_size
-    if args.finetune:
+    bert_model = True if args.model.find("bert") != -1 else False
+    if args.finetune and not bert_model:
         params = [
             {"params": model.stem.parameters(), "lr": 0},
-            {"params": model.layer1.parameters(), "lr": args.l1_lr * args.world_size},
-            {"params": model.layer2.parameters(), "lr": args.l2_lr * args.world_size},
-            {"params": model.layer3.parameters(), "lr": args.l3_lr * args.world_size},
-            {"params": model.layer4.parameters(), "lr": args.l4_lr * args.world_size},
+            {"params": model.layer1.parameters(), "lr": args.l1_lr *
+             args.world_size},
+            {"params": model.layer2.parameters(), "lr": args.l2_lr *
+             args.world_size},
+            {"params": model.layer3.parameters(), "lr": args.l3_lr *
+             args.world_size},
+            {"params": model.layer4.parameters(), "lr": args.l4_lr *
+             args.world_size},
+            {"params": model.fc.parameters(), "lr": args.fc_lr * args.world_size},
+        ]
+    elif args.finetune and bert_model:
+        params = [
+            {"params": model.features.stem.parameters(), "lr": 0},
+            {"params": model.features.layer1.parameters(), "lr": args.l1_lr *
+             args.world_size},
+            {"params": model.features.layer2.parameters(), "lr": args.l2_lr *
+             args.world_size},
+            {"params": model.features.layer3.parameters(), "lr": args.l3_lr *
+             args.world_size},
+            {"params": model.features.layer4.parameters(), "lr": args.l4_lr *
+             args.world_size},
             {"params": model.fc.parameters(), "lr": args.fc_lr * args.world_size},
         ]
     else:
@@ -235,29 +265,34 @@ def train_main(args):
 
     if args.resume:
         checkpoint = torch.load(args.resume, map_location="cpu")
+        print(
+            f"Loading and resuming from checkpoint, epoch: {checkpoint['epoch']}")
         model.load_state_dict(checkpoint["model"])
         optimizer.load_state_dict(checkpoint["optimizer"])
         lr_scheduler.load_state_dict(checkpoint["lr_scheduler"])
         args.start_epoch = checkpoint["epoch"] + 1
+        model.to(device)
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        model = torch.nn.parallel.DistributedDataParallel(
+            model, device_ids=[args.local_rank])
         model_without_ddp = model.module
 
     if args.eval_only:
         print("Starting test_only")
-        metric_logger = MetricLogger(delimiter="  ", writer=writer, stat_set="val")
+        metric_logger = MetricLogger(
+            delimiter="  ", writer=writer, stat_set="val")
         evaluate(model, criterion, data_loader_test, device, metric_logger)
         return
 
     # Get training metric logger
     stat_loggers = get_default_loggers(writer, args.start_epoch)
 
-    print("Start training")
+    print(f"Start training")
     start_time = time.time()
 
-    for epoch in range(args.start_epoch, args.epochs):
+    for epoch in range(args.start_epoch, args.epochs+1):
         if args.distributed:
             train_sampler.set_epoch(epoch)
         train_one_epoch(
@@ -272,7 +307,8 @@ def train_main(args):
             stat_loggers["train"],
             args.apex,
         )
-        evaluate(model, criterion, data_loader_test, device, stat_loggers["val"])
+        evaluate(model, criterion, data_loader_test,
+                 device, stat_loggers["val"])
         if args.output_dir:
             checkpoint = {
                 "model": model_without_ddp.state_dict(),
@@ -282,7 +318,8 @@ def train_main(args):
                 "args": args,
             }
             utils.save_on_master(
-                checkpoint, os.path.join(args.output_dir, "model_{}.pth".format(epoch))
+                checkpoint, os.path.join(
+                    args.output_dir, "model_{}.pth".format(epoch))
             )
             utils.save_on_master(
                 checkpoint, os.path.join(args.output_dir, "checkpoint.pth")

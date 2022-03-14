@@ -33,7 +33,7 @@ def crop(clip, i, j, h, w):
         clip (torch.tensor): Video clip to be cropped. Size is (C, T, H, W)
     """
     assert len(clip.size()) == 4, "clip should be a 4D tensor"
-    return clip[..., i : i + h, j : j + w]
+    return clip[..., i: i + h, j: j + w]
 
 
 def temporal_center_crop(clip, clip_len):
@@ -46,13 +46,13 @@ def temporal_center_crop(clip, clip_len):
     assert clip.size(1) >= clip_len, "clip is shorter than the proposed lenght"
     middle = int(clip.size(1) // 2)
     start = middle - clip_len // 2
-    return clip[:, start : start + clip_len, ...]
+    return clip[:, start: start + clip_len, ...]
 
 
 def resize(clip, target_size, interpolation_mode):
     assert len(target_size) == 2, "target size should be tuple (height, width)"
     return torch.nn.functional.interpolate(
-        clip, size=target_size, mode=interpolation_mode
+        clip, size=target_size, mode=interpolation_mode, align_corners=True
     )
 
 
@@ -232,7 +232,8 @@ class UnfoldClips(object):
         if clip.size(1) < self.clip_len:
             return clip.unfold(1, clip.size(1), clip.size(1)).permute(1, 0, 4, 2, 3)
 
-        results = clip.unfold(1, self.clip_len, self.clip_len).permute(1, 0, 4, 2, 3)
+        results = clip.unfold(
+            1, self.clip_len, self.clip_len).permute(1, 0, 4, 2, 3)
         return results
 
 

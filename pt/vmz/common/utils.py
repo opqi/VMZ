@@ -16,6 +16,9 @@ def accuracy(output, target, topk=(1,)):
         maxk = max(topk)
         batch_size = target.size(0)
 
+        for i in range(batch_size):
+            print(f"Predicted top1 result: {output[i].argmax()}")
+
         _, pred = output.topk(maxk, 1, True, True)
         pred = pred.t()
         correct = pred.eq(target[None])
@@ -83,10 +86,10 @@ def init_distributed_mode(args):
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.rank = int(os.environ["RANK"])
         args.world_size = int(os.environ['WORLD_SIZE'])
-        args.gpu = int(os.environ['LOCAL_RANK'])
+        args.local_rank = int(os.environ['LOCAL_RANK'])
     elif 'SLURM_PROCID' in os.environ:
         args.rank = int(os.environ['SLURM_PROCID'])
-        args.gpu = args.rank % torch.cuda.device_count()
+        args.local_rank = args.rank % torch.cuda.device_count()
     elif hasattr(args, "rank"):
         pass
     else:
@@ -96,7 +99,7 @@ def init_distributed_mode(args):
 
     args.distributed = True
 
-    torch.cuda.set_device(args.gpu)
+    torch.cuda.set_device(args.local_rank)
     args.dist_backend = 'nccl'
     print('| distributed init (rank {}): {}'.format(
         args.rank, args.dist_url), flush=True)
@@ -108,8 +111,9 @@ def init_distributed_mode(args):
 
 
 def get_shared_folder(name) -> Path:
-    if Path("/checkpoint/").is_dir():
-        return Path(f"/checkpoint/bkorbar/experiments/{name}")
+    path = "/home/opqi/VMZ/pt/checkpoints"
+    if Path(path).is_dir():
+        return Path(f"{path}/{name}")
     raise RuntimeError("No shared folder available")
 
 

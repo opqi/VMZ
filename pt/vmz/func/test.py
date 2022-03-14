@@ -1,5 +1,5 @@
 import os
-
+import matplotlib.pyplot as plt
 # TODO: remove unused imports
 import torch
 import torch.utils.data
@@ -19,8 +19,8 @@ __all__ = ["aggredate_video_accuracy", "test", "test_main"]
 
 def aggredate_video_accuracy(softmaxes, labels, topk=(1,), aggregate="mean"):
     # TODO: docs and comments
-    torch.save(labels, "/private/home/bkorbar/torch_projects/VMZ/pt/LABELs.pth")
-    torch.save(softmaxes, "/private/home/bkorbar/torch_projects/VMZ/pt/SM.pth")
+    torch.save(labels, "/home/opqi/VMZ/pt/Labels.pth")
+    torch.save(softmaxes, "/home/opqi/VMZ/pt/SoftMaxs.pth")
 
     maxk = max(topk)
     output_batch = torch.stack(
@@ -30,7 +30,8 @@ def aggredate_video_accuracy(softmaxes, labels, topk=(1,), aggregate="mean"):
         ]
     )
     num_videos = output_batch.size(0)
-    output_labels = torch.stack([labels[video_id] for video_id in softmaxes.keys()])
+    output_labels = torch.stack([labels[video_id]
+                                 for video_id in softmaxes.keys()])
 
     _, pred = output_batch.topk(maxk, 1, True, True)
     pred = pred.t()
@@ -55,8 +56,10 @@ def test(model, criterion, data_loader, device, print_freq, metric_logger):
         for data in metric_logger.log_every(data_loader, print_freq, header):
             i += 1
             video, target, video_idx, _ = data
+
             video = video.to(device, non_blocking=True)
             target = target.to(device, non_blocking=True)
+
             output = model(video)
             loss = criterion(output, target)
 
@@ -69,6 +72,7 @@ def test(model, criterion, data_loader, device, print_freq, metric_logger):
                 # append it to video dict
                 softmaxes.setdefault(video_id, []).append(sm)
                 labels[video_id] = label
+
             acc1, acc5 = utils.accuracy(output, target, topk=(1, 5))
             # FIXME need to take into account that the datasets
             # could have been padded in distributed setup
@@ -78,8 +82,8 @@ def test(model, criterion, data_loader, device, print_freq, metric_logger):
             metric_logger.meters["acc5"].update(acc5.item(), n=batch_size)
     # gather the stats from all processes
     metric_logger.synchronize_between_processes()
-
-    video_acc1, video_acc5 = aggredate_video_accuracy(softmaxes, labels, topk=(1, 5))
+    video_acc1, video_acc5 = aggredate_video_accuracy(
+        softmaxes, labels, topk=(1, 5))
 
     print(
         " *** TESTING SUMMARY:"
@@ -95,7 +99,7 @@ def test(model, criterion, data_loader, device, print_freq, metric_logger):
 
 
 def test_main(args):
-    torchvision.set_video_backend("video_reader")
+    # torchvision.set_video_backend("video_reader")
     if args.output_dir:
         utils.mkdir(args.output_dir)
 
@@ -111,14 +115,15 @@ def test_main(args):
         [
             T.ToTensorVideo(),
             T.Resize((args.scale_h, args.scale_w)),
+            T.CenterCropVideo((args.crop_size, args.crop_size)),
             T.NormalizeVideo(
                 mean=(0.43216, 0.394666, 0.37645), std=(0.22803, 0.22145, 0.216989)
             ),
-            T.CenterCropVideo((args.crop_size, args.crop_size)),
         ]
     )
 
     print("Loading validation data")
+    # useless repetition
     if os.path.isfile(args.val_file):
         metadata = torch.load(args.val_file)
         root = args.valdir
@@ -126,7 +131,7 @@ def test_main(args):
     # TODO: add test option fro datasets that support that
     dataset_test = get_dataset(args, transform_test, "val")
 
-    dataset_test.video_clips.compute_clips(args.num_frames, 1, frame_rate=15)
+    dataset_test.video_clips.compute_clips(args.num_frames, 1, frame_rate=64)
 
     test_sampler = UniformClipSampler(
         dataset_test.video_clips, args.val_clips_per_video
@@ -143,7 +148,15 @@ def test_main(args):
     # TODO: model only from our models
     available_models = {**models.__dict__}
 
-    model = available_models[args.model](pretraining=args.pretrained)
+    model = available_models[args.model](
+        pretraining=args.pretrained, num_classes=args.num_classes)
+
+    # r21d_18
+    # model = torchvision.models.video.r2plus1d_18(pretrained=True)
+    # state_dict = torch.load(
+    #     "/home/opqi/.cache/torch/hub/checkpoints/r2plus1d_18-91a641e6.pth")
+    # model.load_state_dict(state_dict)
+
     model.to(device)
     model_without_ddp = model
 
@@ -162,7 +175,8 @@ def test_main(args):
             model_without_ddp.load_state_dict(checkpoint)
 
     print("Starting test_only")
-    metric_logger = log.MetricLogger(delimiter="  ", writer=None, stat_set="val")
+    metric_logger = log.MetricLogger(
+        delimiter="  ", writer=None, stat_set="val")
     test(model, criterion, data_loader_test, device, 2, metric_logger)
 
 

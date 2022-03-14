@@ -80,6 +80,9 @@ def dataset_load_defaults(args):
         args.annotation_path = (
             "/private/home/bkorbar/data/video/ucf101/orig_annotations/"
         )
+    if args.dataset == "check":
+        args.num_classes = 2
+        args.traindir = "/mnt/d/DataSets/train"
 
     return args
 

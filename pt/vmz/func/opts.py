@@ -5,7 +5,8 @@ __all__ = ["parse_args"]
 
 
 def parse_args():
-    parser = ArgumentParser(description="PyTorch Video Classification Training")
+    parser = ArgumentParser(
+        description="PyTorch Video Classification Training")
     parser.add_argument("--name", default="video_classification_workflow")
     parser.add_argument("--model", default="r2plus1d_18", help="model")
     parser.add_argument("--device", default="cuda", help="device")
@@ -26,7 +27,8 @@ def parse_args():
         metavar="N",
         help="number of data loading workers (default: 10)",
     )
-    parser.add_argument("--lr", default=0.01, type=float, help="initial learning rate")
+    parser.add_argument("--lr", default=0.01, type=float,
+                        help="initial learning rate")
     parser.add_argument(
         "--fc_lr", default=0.1, type=float, help="fully connected learning rate"
     )
@@ -70,7 +72,8 @@ def parse_args():
     parser.add_argument(
         "--lr-warmup-epochs", default=10, type=int, help="number of warmup epochs"
     )
-    parser.add_argument("--print-freq", default=10, type=int, help="print frequency")
+    parser.add_argument("--print-freq", default=10,
+                        type=int, help="print frequency")
     parser.add_argument("--finetune", action="store_true", default=False)
     parser.add_argument("--num_finetune_classes", default=101, type=int)
     parser.add_argument("--output-dir", default=".", help="path where to save")
@@ -120,20 +123,22 @@ def parse_args():
         "--world-size", default=1, type=int, help="number of distributed processes"
     )
     parser.add_argument(
-        "--dist-url", default="env://", help="url used to set up distributed training"
+        "--local_rank", default=-1, type=int, help="unique local ID for a single node processes"
+    )
+    parser.add_argument(
+        "--dist-url", default="tcp://127.0.0.1:29500", help="url used to set up distributed training"
     )
     # slurm args
-    parser.add_argument("--partition", default="dev", help="Slurm partition to use?")
-    parser.add_argument("--nodes", default=2, type=int, help="number nodes tu use")
+    parser.add_argument("--partition", default="dev",
+                        help="Slurm partition to use?")
+    parser.add_argument("--nodes", default=2, type=int,
+                        help="number nodes tu use")
 
     # get dataset arguments
     parser = get_dataset_arguments(parser)
 
     # parse the args
     args = parser.parse_args()
-
-    # TODO: remove this before publishing
-    args = dataset_load_defaults(args)
 
     # safety checks
     dataset_asserts(args)
